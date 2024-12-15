@@ -2698,7 +2698,7 @@ public class BlockManager implements BlockStatsMXBean {
           if (bi == null || bi.isDeleted()) {
             continue;
           }
-          NumberReplicas num = countNodes(timedOutItems[i]);
+          NumberReplicas num = countNodes(bi);
           if (isNeededReconstruction(bi, num)) {
             neededReconstruction.add(bi, num.liveReplicas(),
                 num.readOnlyReplicas(), num.outOfServiceReplicas(),
@@ -5148,6 +5148,15 @@ public class BlockManager implements BlockStatsMXBean {
     return storedBlock.isComplete() && (numberReplicas.liveReplicas() <
         getMinMaintenanceStorageNum(storedBlock) ||
         !isPlacementPolicySatisfied(storedBlock));
+  }
+
+  boolean isNeededReconstruction(Block block) {
+    BlockInfo storedBlock = blocksMap.getStoredBlock(block);
+    if (storedBlock == null || storedBlock.isDeleted()) {
+      return false;
+    }
+    NumberReplicas num = countNodes(storedBlock);
+    return isNeededReconstruction(storedBlock, num);
   }
 
   boolean isNeededReconstruction(BlockInfo storedBlock,

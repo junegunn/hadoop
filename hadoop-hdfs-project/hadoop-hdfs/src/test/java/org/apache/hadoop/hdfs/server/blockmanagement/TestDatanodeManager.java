@@ -35,7 +35,11 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.apache.hadoop.hdfs.protocol.Block;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -88,6 +92,11 @@ public class TestDatanodeManager {
   private static DatanodeManager mockDatanodeManager(
       FSNamesystem fsn, Configuration conf) throws IOException {
     BlockManager bm = Mockito.mock(BlockManager.class);
+    return mockDatanodeManager(bm, fsn, conf);
+  }
+
+  private static DatanodeManager mockDatanodeManager(
+      BlockManager bm, FSNamesystem fsn, Configuration conf) throws IOException {
     Mockito.when(bm.getMaxReplicationStreams()).thenReturn(
         conf.getInt(DFSConfigKeys.DFS_NAMENODE_REPLICATION_MAX_STREAMS_KEY, 2));
     Mockito.when(bm.getReplicationStreamsHardLimit()).thenReturn(
@@ -965,6 +974,18 @@ public class TestDatanodeManager {
         "127.0.0.1:23456", bothAgain.get(1).getInfoAddr());
   }
 
+  private BlockECReconstructionInfo mockECReconstructionInfo(BlockManager bm, boolean needed) {
+    BlockECReconstructionInfo ec = Mockito.mock(BlockECReconstructionInfo.class, Mockito.RETURNS_DEEP_STUBS);
+    Block block = Mockito.mock(Block.class);
+    Mockito.when(ec.getExtendedBlock().getLocalBlock()).thenReturn(block);
+    Mockito.when(bm.isNeededReconstruction(block)).thenReturn(needed);
+    if (!needed) {
+      Mockito.when(ec.getTargetDnInfos()).thenReturn(DatanodeInfo.EMPTY_ARRAY);
+      Mockito.when(ec.getTargetStorageTypes()).thenReturn(StorageType.EMPTY_ARRAY);
+    }
+    return ec;
+  }
+
   /**
    * Verify the correctness of pending recovery process.
    *
@@ -992,7 +1013,8 @@ public class TestDatanodeManager {
     conf.setInt(DFSConfigKeys.DFS_NAMENODE_REPLICATION_MAX_STREAMS_KEY, maxTransfers);
     conf.setInt(DFSConfigKeys.DFS_NAMENODE_REPLICATION_STREAMS_HARD_LIMIT_KEY,
         maxTransfersHardLimit);
-    DatanodeManager dm = Mockito.spy(mockDatanodeManager(fsn, conf));
+    BlockManager bm = Mockito.mock(BlockManager.class);
+    DatanodeManager dm = Mockito.spy(mockDatanodeManager(bm, fsn, conf));
 
     DatanodeDescriptor nodeInfo = Mockito.mock(DatanodeDescriptor.class);
     Mockito.when(nodeInfo.isRegistered()).thenReturn(true);
@@ -1029,8 +1051,12 @@ public class TestDatanodeManager {
       Mockito.when(nodeInfo.getNumberOfBlocksToBeErasureCoded())
           .thenReturn(numBlocksToBeErasureCoded);
 
-      List<BlockECReconstructionInfo> tasks =
-          Collections.nCopies(numECTasksToBeErasureCoded, null);
+      BlockECReconstructionInfo ec = mockECReconstructionInfo(bm, true);
+      BlockECReconstructionInfo ecRedundant = mockECReconstructionInfo(bm, false);
+
+      // Interleave redundant tasks so that we can verify that they are ignored.
+      List<BlockECReconstructionInfo> tasks = Collections.nCopies(numECTasksToBeErasureCoded, ec).stream()
+          .flatMap(e -> Stream.of(ecRedundant, e, ecRedundant)).collect(Collectors.toList());
       Mockito.when(nodeInfo.getErasureCodeCommand(numECTasksToBeErasureCoded))
           .thenReturn(tasks);
     }

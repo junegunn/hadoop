@@ -1924,10 +1924,42 @@ public class DatanodeManager {
               pendingList));
         }
       }
-      // check pending erasure coding tasks
-      List<BlockECReconstructionInfo> pendingECList = nodeinfo
-          .getErasureCodeCommand(numECReconstructedTasks);
-      if (pendingECList != null && !pendingECList.isEmpty()) {
+
+      // Collect pending EC tasks, excluding the ones that are no longer needed
+      List<BlockECReconstructionInfo> pendingECList = new ArrayList<>();
+      while (pendingECList.size() < numECReconstructedTasks) {
+        List<BlockECReconstructionInfo> list =
+            nodeinfo.getErasureCodeCommand(numECReconstructedTasks - pendingECList.size());
+        if (list == null) {
+          break;
+        }
+        list.removeIf(ecRecon -> {
+          // Check again if this task is still needed in case it's scheduled multiple times
+          // due to pending reconstruction timeouts.
+          Block block = ecRecon.getExtendedBlock().getLocalBlock();
+          if (blockManager.isNeededReconstruction(block)) {
+            return false;
+          }
+
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("Block {} doesn't need reconstruction: {}", block, ecRecon);
+          }
+
+          // Adjust the metrics
+          DatanodeInfo[] targets = ecRecon.getTargetDnInfos();
+          StorageType[] storageTypes = ecRecon.getTargetStorageTypes();
+          for (int i = 0; i < targets.length; i++) {
+            try {
+              getDatanode(targets[i]).decrementBlocksScheduled(storageTypes[i]);
+            } catch (UnregisteredNodeException e) {
+              LOG.debug("Target datanode {} is not registered", targets[i]);
+            }
+          }
+          return true;
+        });
+        pendingECList.addAll(list);
+      }
+      if (!pendingECList.isEmpty()) {
         cmds.add(new BlockECReconstructionCommand(
             DNA_ERASURE_CODING_RECONSTRUCTION, pendingECList));
       }
