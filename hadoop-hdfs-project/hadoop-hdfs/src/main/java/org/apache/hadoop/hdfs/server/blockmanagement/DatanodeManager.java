@@ -1927,10 +1927,10 @@ public class DatanodeManager {
 
       // Collect pending EC tasks, excluding the ones that are no longer needed
       List<BlockECReconstructionInfo> pendingECList = new ArrayList<>();
-      while (pendingECList.size() < numECReconstructedTasks) {
+      do {
         List<BlockECReconstructionInfo> list =
             nodeinfo.getErasureCodeCommand(numECReconstructedTasks - pendingECList.size());
-        if (list == null) {
+        if (list == null || list.isEmpty()) {
           break;
         }
         list.removeIf(ecRecon -> {
@@ -1958,7 +1958,7 @@ public class DatanodeManager {
           return true;
         });
         pendingECList.addAll(list);
-      }
+      } while (pendingECList.size() < numECReconstructedTasks);
       if (!pendingECList.isEmpty()) {
         cmds.add(new BlockECReconstructionCommand(
             DNA_ERASURE_CODING_RECONSTRUCTION, pendingECList));
